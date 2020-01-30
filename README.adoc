@@ -1,0 +1,3 @@
+= My first few lines of Rust code
+
+I was curious about Rust so I decided to jump in and start writing some code.
