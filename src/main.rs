@@ -2,16 +2,16 @@
 
 use rocket::*;
 
-// #[macro_use]
 use mysql::{Error};
 
 use rocket_contrib::json::Json;
 
 use serde::{Serialize, Deserialize};
+use hello_world::customer_service::CustomerService;
+use std::sync::Arc;
+use hello_world::event_publishing::DomainEventPublisher;
 
-mod customer_service;
-mod customer_events;
-mod event_publishing;
+
 
 #[derive(Serialize, Deserialize)]
 struct CreateCustomerRequest {
@@ -24,30 +24,42 @@ struct CreateCustomerResponse {
     id : i64
 }
 
-impl Drop for CreateCustomerResponse {
-    fn drop(&mut self) {
-        println!("goodbye")
-    }
+#[derive(Serialize, Deserialize)]
+struct GetCustomerResponse {
+    id : i64,
+    name : String,
+    credit_limit: i64
 }
 
-use crate::customer_service::save_customer;
-use std::ops::Deref;
-
 #[post("/customers", format = "application/json", data = "<request>")]
-fn create_customer(pool: State<mysql::Pool>, request : Json<CreateCustomerRequest>) -> Result<Json<CreateCustomerResponse>, Error> {
-    let p : &mysql::Pool = pool.deref();
-
-    let id = save_customer(p, &request.name, request.credit_limit)?;
+fn create_customer(customer_service : State<CustomerService>,
+                   request : Json<CreateCustomerRequest>) -> Result<Json<CreateCustomerResponse>, Error> {
+    let id = customer_service.save_customer(&request.name, request.credit_limit)?;
 
     Ok(Json(CreateCustomerResponse { id: id }))
 }
 
+#[get("/customers/<id>", format = "application/json")]
+fn get_customer(customer_service : State<CustomerService>,
+                   id : i64) -> Result<Json<GetCustomerResponse>, Error> {
+    let customer = customer_service.find_customer(id)?;
+
+    // TODO - return 404 if customer not found
+    // Write some tests
+    
+    Ok(Json(GetCustomerResponse { id: customer.id, name: customer.name, credit_limit: customer.credit_limit }))
+}
 
 fn main() {
-    let pool = mysql::Pool::new_manual(1, 1, "mysql://root:rootpassword@localhost:3306").unwrap();
+    let pool = Arc::new(mysql::Pool::new_manual(1, 1, "mysql://root:rootpassword@localhost:3306").unwrap());
+    let domain_event_publisher  = Arc::new(DomainEventPublisher{});
+
+    let customer_service : CustomerService = CustomerService::new(&domain_event_publisher, &pool);
+    // example of multi-uses of pool, etc.
+    let _customer_service2 : CustomerService = CustomerService::new(&domain_event_publisher, &pool);
 
     rocket::ignite()
-        .mount("/", routes![create_customer])
-        .manage(pool)
+        .mount("/", routes![create_customer, get_customer])
+        .manage(customer_service)
         .launch();
 }

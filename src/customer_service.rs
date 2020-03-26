@@ -1,35 +1,79 @@
-use mysql::{params, Error};
 
-use mysql::Transaction;
-use mysql::IsolationLevel;
+use mysql::*;
 
 use crate::customer_events::CustomerCreatedEvent;
-use crate::event_publishing::publish_event;
+use crate::event_publishing::DomainEventPublisher;
 
-pub fn save_customer(pool : &mysql::Pool, name : &String, credit_limit : i64) -> Result<i64, Error> {
+use std::sync::Arc;
 
-    let mut con = pool.get_conn().unwrap();
+pub struct CustomerService {
+    domain_event_publisher: Arc<DomainEventPublisher>,
+    pool: Arc<mysql::Pool>
+}
 
-    let mut txn = con.start_transaction(true, Some(IsolationLevel::RepeatableRead), Some(false)).unwrap();
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct CustomerDTO {
+    pub id : i64,
+    pub name : String,
+    pub credit_limit: i64
+}
 
-    let insert_result =
-        txn.prep_exec("insert into eventuate.customers(name, credit_limit) values(:name, :credit_limit)",
-                      params!{"name" =>  name, "credit_limit" => credit_limit});
-    insert_result?;
+impl CustomerService {
+    pub fn new(domain_event_publisher: &Arc<DomainEventPublisher>, pool: &Arc<mysql::Pool>) -> CustomerService {
+        let x : Arc<DomainEventPublisher> = domain_event_publisher.clone();
+        let y : Arc<mysql::Pool> = pool.clone();
+        CustomerService{ domain_event_publisher: x, pool: y }
+    }
 
-    let id = get_last_insert_id(&mut txn)?;
+    pub fn save_customer(&self, name: &String, credit_limit: i64) -> Result<i64> {
+        let mut con = self.pool.get_conn().unwrap();
 
-    publish_event(&mut txn, "Customer".to_string(), id,
-                  &CustomerCreatedEvent { name: name.clone(), credit_limit: credit_limit })?;
+        let mut txn = con.start_transaction(true, Some(IsolationLevel::RepeatableRead), Some(false)).unwrap();
+
+        let insert_result =
+            txn.prep_exec("insert into eventuate.customers(name, credit_limit) values(:name, :credit_limit)",
+                          params! {"name" =>  name, "credit_limit" => credit_limit});
+        insert_result?;
+
+        let id = get_last_insert_id(&mut txn)?;
+
+        self.domain_event_publisher .publish_event(&mut txn, "Customer".to_string(), id,
+                                             &CustomerCreatedEvent { name: name.clone(), credit_limit: credit_limit })?;
+
+        txn.commit()?;
+
+        Ok(id)
+    }
 
 
-    txn.commit()?;
+    pub fn find_customer(&self, id : i64) -> Result<CustomerDTO> {
+        let mut con = self.pool.get_conn().unwrap();
 
-    Ok(id)
+        let mut txn = con.start_transaction(true, Some(IsolationLevel::RepeatableRead), Some(false)).unwrap();
+
+        let qr : QueryResult = txn
+            .prep_exec(
+                "SELECT id, name, credit_limit from eventuate.customers where id = :id ", params!{id}
+            )?;
+
+        let customers : Vec<CustomerDTO> = qr.map(|row| {
+          let r = row.unwrap();
+            let id : i64 = r.get(0).unwrap();
+            let name : String = r.get(1).unwrap();
+            let credit_limit: i64 = r.get(2).unwrap();
+            CustomerDTO {id, name, credit_limit }
+        }).collect();
+
+       txn.commit()?;
+
+       let customer : &CustomerDTO = customers.first().unwrap();
+
+       Ok(customer.clone())
+    }
 
 }
 
-fn get_last_insert_id(txn : &mut Transaction) -> Result<i64, Error> {
+fn get_last_insert_id(txn: &mut Transaction) -> Result<i64> {
     let exec_result = txn.prep_exec("SELECT LAST_INSERT_ID()", ());
     let ids: Vec<i64> = exec_result
         .map(|result| {

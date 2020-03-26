@@ -7,7 +7,13 @@ use serde::Serialize;
 use std::time::SystemTime;
 use std::collections::HashMap;
 
-pub(crate) fn publish_event<T : Serialize<>, I : ToString>(txn : &mut Transaction, aggregate_type : String, aggregate_id : I, event : &T) -> Result<(), Error> {
+pub struct DomainEventPublisher {
+
+}
+
+impl DomainEventPublisher  {
+
+pub fn publish_event<T : Serialize<>, I : ToString>(&self, txn : &mut Transaction, aggregate_type : String, aggregate_id : I, event : &T) -> Result<(), Error> {
     let now = SystemTime::now();
 
     let id = now.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
@@ -46,4 +52,5 @@ pub(crate) fn publish_event<T : Serialize<>, I : ToString>(txn : &mut Transactio
 
     Ok(())
 
+}
 }
