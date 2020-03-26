@@ -1,0 +1,2 @@
+
+http -v --json POST http://localhost:8000/customers name=Chris credit_limit:=100
