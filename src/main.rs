@@ -41,13 +41,11 @@ fn create_customer(customer_service : State<CustomerService>,
 
 #[get("/customers/<id>", format = "application/json")]
 fn get_customer(customer_service : State<CustomerService>,
-                   id : i64) -> Result<Json<GetCustomerResponse>, Error> {
-    let customer = customer_service.find_customer(id)?;
-
-    // TODO - return 404 if customer not found
-    // Write some tests
-    
-    Ok(Json(GetCustomerResponse { id: customer.id, name: customer.name, credit_limit: customer.credit_limit }))
+                   id : i64) -> Result<Option<Json<GetCustomerResponse>>, Error> {
+    let maybe_customer = customer_service.find_customer(id)?;
+    Ok(maybe_customer.map(|customer| {
+        Json(GetCustomerResponse { id: customer.id, name: customer.name, credit_limit: customer.credit_limit })
+    }))
 }
 
 fn main() {

@@ -46,7 +46,7 @@ impl CustomerService {
     }
 
 
-    pub fn find_customer(&self, id : i64) -> Result<CustomerDTO> {
+    pub fn find_customer(&self, id : i64) -> Result<Option<CustomerDTO>> {
         let mut con = self.pool.get_conn().unwrap();
 
         let mut txn = con.start_transaction(true, Some(IsolationLevel::RepeatableRead), Some(false)).unwrap();
@@ -66,9 +66,7 @@ impl CustomerService {
 
        txn.commit()?;
 
-       let customer : &CustomerDTO = customers.first().unwrap();
-
-       Ok(customer.clone())
+       Ok(customers.first().map(|c|  { c.clone() } ))
     }
 
 }
