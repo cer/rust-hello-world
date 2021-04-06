@@ -1,0 +1,43 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+    types:
+      - opened
+      - edited
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout source
+      uses: actions/checkout@v2
+    - uses: actions-rs/toolchain@v1
+
+    - name: Run cargo build
+      uses: actions-rs/cargo@v1
+      with:
+        command: build
+
+    - name: Compose Up
+      run: |
+        docker-compose up -d --build
+
+    - name: Run cargo test
+      uses: actions-rs/cargo@v1
+      with:
+        command: test
+
+    - name: get container logs
+      run: ./.github/workflows/print-container-logs.sh
+      if: ${{ always() }}
+
+    - name: Save container logs
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v2
+      with:
+        name: container-logs
+        path: ~/container-logs
+
