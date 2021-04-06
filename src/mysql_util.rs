@@ -1,8 +1,14 @@
 
 
 use std::sync::Arc;
-use mysql::Pool;
+use sqlx::mysql::*;
+use sqlx::Pool;
 
-pub fn new_connection_pool() -> Arc<Pool> {
-    Arc::new(Pool::new_manual(10, 50, "mysql://root:rootpassword@localhost:3306").unwrap())
+pub async fn new_connection_pool() -> sqlx::Result<Arc<Pool<MySql>>> {
+
+    let pool = MySqlPoolOptions::new()
+        .max_connections(5)
+        .connect("mysql://root:rootpassword@localhost:3306").await?;
+
+    Ok(Arc::new(pool ))
 }

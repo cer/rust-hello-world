@@ -8,6 +8,15 @@ edition = "2018"
 
 [dependencies]
 actix-web = "3"
-mysql = "20.1.0"
-serde = { version = "1.0", features = ["derive"] }
+actix-rt = "*"
+
+sqlx = { version = "0.5.1", features = [ "mysql", "runtime-async-std-native-tls" ] }
+#async-std = { version = "1.6", features = [ "attributes" ] }
+
+# tokio + rustls
+#sqlx = { version = "0.5.1", features = [ "runtime-tokio-rustls" ] }
+# async-std + native-tls
+#sqlx = { version = "0.5", features = [ "runtime-async-std-native-tls" ] }
+
+serde = { version = "1.0.110", features = ["derive"] }
 serde_json = "1.0"

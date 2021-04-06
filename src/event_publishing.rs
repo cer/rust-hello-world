@@ -1,11 +1,8 @@
 
-use mysql::{params, Error};
-
-use mysql::Transaction;
-
 use serde::Serialize;
 use std::time::SystemTime;
 use std::collections::HashMap;
+use sqlx::*;
 
 pub struct DomainEventPublisher {
 
@@ -13,11 +10,14 @@ pub struct DomainEventPublisher {
 
 impl DomainEventPublisher  {
 
-pub fn publish_event<T : Serialize<>, I : ToString>(&self, txn : &mut Transaction, aggregate_type : String, aggregate_id : I, event : &T) -> Result<(), Error> {
+pub async fn publish_event<T : Serialize<>, I : ToString>(&self, txn : &mut Transaction<'_, MySql>, aggregate_type : String, aggregate_id : I, event : &T) -> Result<()> {
     let now = SystemTime::now();
 
-    let id = now.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
-    let creation_time = id;
+    // Find better way
+
+    let t = now.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
+    let id = t.to_string();
+    let creation_time = t.to_string();
     let payload = serde_json::to_string(event).unwrap();
 
     let mut header_values : HashMap<&str, String> = HashMap::new();
@@ -38,18 +38,14 @@ pub fn publish_event<T : Serialize<>, I : ToString>(&self, txn : &mut Transactio
 
     let headers = serde_json::to_string(&header_values).unwrap();
 
-    dbg!(&headers);
-
-    let insert_result =
-        txn.prep_exec("insert into eventuate.message(id, destination, headers, payload, creation_time) values(:id, :destination, :headers, :payload, :creation_time)",
-                      params!{"id" =>  id,
-                      "destination" => aggregate_type,
-                      "headers" => headers,
-                      "payload" => payload,
-                      "creation_time" => creation_time,
-                      });
-    insert_result?;
-
+    sqlx::query("insert into eventuate.message(id, destination, headers, payload, creation_time) values(?,?,?,?,?)")
+        .bind(&id)
+        .bind(aggregate_type)
+        .bind(headers)
+        .bind(payload)
+        .bind(creation_time)
+        .execute(txn)
+        .await?;
     Ok(())
 
 }

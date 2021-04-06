@@ -1,6 +1,8 @@
 
-use mysql::*;
-use mysql::prelude::*;
+use sqlx::mysql::*;
+use sqlx::{Pool, Row};
+use sqlx::Transaction;
+
 
 use crate::customer_events::CustomerCreatedEvent;
 use crate::event_publishing::DomainEventPublisher;
@@ -9,7 +11,7 @@ use std::sync::Arc;
 
 pub struct CustomerService {
     domain_event_publisher: Arc<DomainEventPublisher>,
-    pool: Arc<mysql::Pool>
+    pool: Arc<Pool<MySql>>
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -20,63 +22,62 @@ pub struct CustomerDTO {
 }
 
 impl CustomerService {
-    pub fn new(domain_event_publisher: &Arc<DomainEventPublisher>, pool: &Arc<mysql::Pool>) -> CustomerService {
+    pub fn new(domain_event_publisher: &Arc<DomainEventPublisher>, pool: &Arc<Pool<MySql>>) -> CustomerService {
         let x : Arc<DomainEventPublisher> = domain_event_publisher.clone();
-        let y : Arc<mysql::Pool> = pool.clone();
+        let y : Arc<Pool<MySql>> = pool.clone();
         CustomerService{ domain_event_publisher: x, pool: y }
     }
 
-    pub fn save_customer(&self, name: &String, credit_limit: i64) -> Result<i64> {
-        let mut con = self.pool.get_conn().unwrap();
+    pub async fn save_customer(&self, name: &String, credit_limit: i64) -> Result<i64, sqlx::Error> {
+        let mut txn = self.pool.begin().await?;
 
-        let mut txn = con.start_transaction(TxOpts::default())?;
+        sqlx::query("insert into eventuate.customers(name, credit_limit) values(?, ?)")
+            .bind(name)
+            .bind(credit_limit)
+            .execute(&mut txn)
+            .await?;
 
-        let insert_result =
-            txn.exec_drop("insert into eventuate.customers(name, credit_limit) values(?, ?)",
-                          (name, credit_limit,))?;
-
-        let id = get_last_insert_id(&mut txn)?;
+        let id = get_last_insert_id(&mut txn).await?;
 
         self.domain_event_publisher .publish_event(&mut txn, "Customer".to_string(), id,
-                                             &CustomerCreatedEvent { name: name.clone(), credit_limit: credit_limit })?;
+                                             &CustomerCreatedEvent { name: name.clone(), credit_limit: credit_limit }).await?;
 
-        txn.commit()?;
+        txn.commit().await?;
 
         Ok(id)
     }
 
 
-    pub fn find_customer(&self, id : i64) -> Result<Option<CustomerDTO>> {
-        let mut con = self.pool.get_conn().unwrap();
+    pub async fn find_customer(&self, id : i64) -> Result<Option<CustomerDTO>, sqlx::Error> {
+        let mut txn = self.pool.begin().await?;
 
-        let mut txn = con.start_transaction(TxOpts::default())?;
+        let customer = sqlx::query("SELECT name, credit_limit from eventuate.customers where id = ? ")
+            .bind(id)
+            .map(|row| -> Result<CustomerDTO, sqlx::Error> {
+                let name = row.try_get("name")?;
+                let credit_limit :i64 = row.try_get("credit_limit")?;
+                Ok(CustomerDTO { id, name, credit_limit: credit_limit })
+            })
+            .fetch_optional(&mut txn)
+            .await?;
 
-        let qwp = "SELECT name, credit_limit from eventuate.customers where id = ? "
-            .with((id,));
+       txn.commit().await?;
 
-        let customer = txn.query_map(qwp,
-                |(name, credit_limit)| {
-                    CustomerDTO {id, name, credit_limit }
-                },
-            )?;
-
-       txn.commit()?;
-
-       Ok(customer.clone())
+        match customer  {
+            Some(r) => {
+                let c = r?;
+                Ok(Some(c))
+            }
+            None => Ok(None)
+        }
     }
 
 }
 
-fn get_last_insert_id(txn: &mut Transaction) -> Result<i64> {
-    let s = txn.prep("SELECT LAST_INSERT_ID()", ())?;
-    let exec_result = s.exec_first(&s, ())?.unwrap();
-    let ids: Vec<i64> = exec_result
-        .map(|result| {
-            result.map(|x| x.unwrap())
-                .map(|row| {
-                    mysql::from_row(row)
-                }).collect()
-        })?;
-    let id = ids.first().unwrap();
-    Ok(*id)
+async fn get_last_insert_id(txn: &mut Transaction<'_, MySql>) -> Result<i64, sqlx::Error> {
+    let row = sqlx::query("SELECT LAST_INSERT_ID() as ID")
+        .fetch_one(txn)
+        .await?;
+    let id: u64  = row.try_get("ID")?;
+    Ok(id as i64)
 }
