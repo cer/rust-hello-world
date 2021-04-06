@@ -1,5 +1,3 @@
-#![feature(proc_macro_hygiene, decl_macro)]
-
 use actix_web::{get, post, web, App, HttpResponse, HttpServer};
 
 use serde::{Serialize, Deserialize};
