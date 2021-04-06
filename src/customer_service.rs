@@ -1,5 +1,6 @@
 
 use mysql::*;
+use mysql::prelude::*;
 
 use crate::customer_events::CustomerCreatedEvent;
 use crate::event_publishing::DomainEventPublisher;
@@ -28,12 +29,11 @@ impl CustomerService {
     pub fn save_customer(&self, name: &String, credit_limit: i64) -> Result<i64> {
         let mut con = self.pool.get_conn().unwrap();
 
-        let mut txn = con.start_transaction(true, Some(IsolationLevel::RepeatableRead), Some(false)).unwrap();
+        let mut txn = con.start_transaction(TxOpts::default())?;
 
         let insert_result =
-            txn.prep_exec("insert into eventuate.customers(name, credit_limit) values(:name, :credit_limit)",
-                          params! {"name" =>  name, "credit_limit" => credit_limit});
-        insert_result?;
+            txn.exec_drop("insert into eventuate.customers(name, credit_limit) values(?, ?)",
+                          (name, credit_limit,))?;
 
         let id = get_last_insert_id(&mut txn)?;
 
@@ -49,30 +49,27 @@ impl CustomerService {
     pub fn find_customer(&self, id : i64) -> Result<Option<CustomerDTO>> {
         let mut con = self.pool.get_conn().unwrap();
 
-        let mut txn = con.start_transaction(true, Some(IsolationLevel::RepeatableRead), Some(false)).unwrap();
+        let mut txn = con.start_transaction(TxOpts::default())?;
 
-        let qr : QueryResult = txn
-            .prep_exec(
-                "SELECT id, name, credit_limit from eventuate.customers where id = :id ", params!{id}
+        let qwp = "SELECT name, credit_limit from eventuate.customers where id = ? "
+            .with((id,));
+
+        let customer = txn.query_map(qwp,
+                |(name, credit_limit)| {
+                    CustomerDTO {id, name, credit_limit }
+                },
             )?;
-
-        let customers : Vec<CustomerDTO> = qr.map(|row| {
-          let r = row.unwrap();
-            let id : i64 = r.get(0).unwrap();
-            let name : String = r.get(1).unwrap();
-            let credit_limit: i64 = r.get(2).unwrap();
-            CustomerDTO {id, name, credit_limit }
-        }).collect();
 
        txn.commit()?;
 
-       Ok(customers.first().map(|c|  { c.clone() } ))
+       Ok(customer.clone())
     }
 
 }
 
 fn get_last_insert_id(txn: &mut Transaction) -> Result<i64> {
-    let exec_result = txn.prep_exec("SELECT LAST_INSERT_ID()", ());
+    let s = txn.prep("SELECT LAST_INSERT_ID()", ())?;
+    let exec_result = s.exec_first(&s, ())?.unwrap();
     let ids: Vec<i64> = exec_result
         .map(|result| {
             result.map(|x| x.unwrap())
