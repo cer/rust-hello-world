@@ -10,6 +10,7 @@ use serde::{Serialize, Deserialize};
 use hello_world::customer_service::CustomerService;
 use std::sync::Arc;
 use hello_world::event_publishing::DomainEventPublisher;
+use hello_world::mysql_util::new_connection_pool;
 
 
 
@@ -49,9 +50,8 @@ fn get_customer(customer_service : State<CustomerService>,
 }
 
 fn main() {
-    let pool = Arc::new(mysql::Pool::new_manual(1, 1, "mysql://root:rootpassword@localhost:3306").unwrap());
+    let pool = new_connection_pool();
     let domain_event_publisher  = Arc::new(DomainEventPublisher{});
-
     let customer_service : CustomerService = CustomerService::new(&domain_event_publisher, &pool);
     // example of multi-uses of pool, etc.
     let _customer_service2 : CustomerService = CustomerService::new(&domain_event_publisher, &pool);
