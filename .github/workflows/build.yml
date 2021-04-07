@@ -28,6 +28,7 @@ jobs:
     - name: Compose Up
       run: |
         docker-compose up -d --build
+        ./wait-for-mysql.sh
 
     - name: Run cargo test
       uses: actions-rs/cargo@v1
